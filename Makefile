@@ -5,10 +5,10 @@ DIST = $(PWD)/dist
 clean:
 	rm -rf $(DIST) *.deb
 
-$(DIST)/smtp-send: server.go
+$(DIST)/mailout: server.go
 	mkdir -p $(DIST)
-	go build -o $(DIST)/usr/local/sbin/smtp-send
+	go build -o $(DIST)/usr/local/sbin/mailout
 
 .PHONY: deb
-deb: $(DIST)/smtp-send
-	fpm -n smtp-send -s dir -t deb --chdir=$(DIST) --version=$(VERSION)
+deb: $(DIST)/mailout
+	fpm -n mailout -s dir -t deb --chdir=$(DIST) --version=$(VERSION)
