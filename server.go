@@ -28,8 +28,7 @@ func env(name string) string {
 }
 
 var (
-	DB_API_SECRET_TOKEN = env("DB_API_SECRET_TOKEN")
-	LOCAL_NAME          = env("REMOTE_HOST")
+	LOCAL_NAME = env("REMOTE_HOST")
 
 	EXT_SMTP_USERNAME = env("EXT_SMTP_USERNAME")
 	EXT_SMTP_PASSWORD = env("EXT_SMTP_PASSWORD")
@@ -109,9 +108,6 @@ func updateMailStatus(domain string, uuid string, status int) error {
 	req, err := http.NewRequest(http.MethodPut, url, strings.NewReader(body))
 	if err != nil {
 		return err
-	}
-	req.Header = http.Header{
-		"x-token": []string{DB_API_SECRET_TOKEN},
 	}
 
 	_, err = client.Do(req)
