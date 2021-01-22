@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net"
 	"net/http"
 	"net/mail"
@@ -14,25 +13,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mailway-app/config"
 	smtpclient "github.com/mailway-app/go-smtp/client"
 	smtpserver "github.com/mailway-app/go-smtp/server"
+
+	log "github.com/sirupsen/logrus"
 	dkim "github.com/toorop/go-dkim"
 )
 
-func env(name string) string {
-	v := os.Getenv(name)
-	if v == "" {
-		panic(name + " needs to be provided in env")
-	}
-	return v
-}
-
 var (
-	LOCAL_NAME = env("REMOTE_HOST")
+	LOCAL_NAME = ""
 
-	EXT_SMTP_USERNAME = env("EXT_SMTP_USERNAME")
-	EXT_SMTP_PASSWORD = env("EXT_SMTP_PASSWORD")
-	EXT_SMTP_HOST     = env("EXT_SMTP_HOST")
+	EXT_SMTP_USERNAME = os.Getenv("EXT_SMTP_USERNAME")
+	EXT_SMTP_PASSWORD = os.Getenv("EXT_SMTP_PASSWORD")
+	EXT_SMTP_HOST     = os.Getenv("EXT_SMTP_HOST")
 )
 
 func check(err error) {
@@ -155,19 +149,23 @@ func mailHandler(origin net.Addr, from string, to []string, data []byte) {
 		signedData := data
 
 		options := dkim.NewSigOptions()
-		privateKey, err := ioutil.ReadFile("/etc/ssl/dkim-external.pem")
-		check(err)
-		options.PrivateKey = privateKey
-		options.Domain = domain
-		options.Selector = "smtp"
-		options.SignatureExpireIn = 3600
-		options.Headers = []string{"Content-Type", "To", "Subject", "Message-ID", "Date", "From", "MIME-Version", "Sender"}
-		options.AddSignatureTimestamp = true
-		options.Canonicalization = "relaxed/relaxed"
-		err = dkim.Sign(&signedData, options)
-		if err != nil {
-			log.Printf("could not sign email: %s\n", err)
-			return
+		if _, err := os.Stat("/etc/ssl/dkim-external.pem"); !os.IsNotExist(err) {
+			privateKey, err := ioutil.ReadFile("/etc/ssl/dkim-external.pem")
+			check(err)
+			options.PrivateKey = privateKey
+			options.Domain = domain
+			options.Selector = "smtp"
+			options.SignatureExpireIn = 3600
+			options.Headers = []string{"Content-Type", "To", "Subject", "Message-ID", "Date", "From", "MIME-Version", "Sender"}
+			options.AddSignatureTimestamp = true
+			options.Canonicalization = "relaxed/relaxed"
+			err = dkim.Sign(&signedData, options)
+			if err != nil {
+				log.Printf("could not sign email: %s\n", err)
+				return
+			}
+		} else {
+			log.Info("didn't sign email because key was not found")
 		}
 
 		err = smtpclient.SendMail(LOCAL_NAME, smtpAddr+":25", nil, returnPath, []string{to}, signedData)
@@ -191,6 +189,16 @@ func mailHandler(origin net.Addr, from string, to []string, data []byte) {
 }
 
 func main() {
+	c, err := config.Read()
+	if err != nil {
+		panic(err)
+	}
+
+	if c.IntanceHostname == "" {
+		panic("instance hostname is needed")
+	}
+	LOCAL_NAME = c.IntanceHostname
+
 	if err := Run("127.0.0.1:2525", mailHandler, rcptHandler); err != nil {
 		log.Fatal(err)
 	}
