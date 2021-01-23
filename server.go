@@ -117,6 +117,10 @@ func sendMailgun(from string, to string, data []byte) error {
 	return smtpclient.SendMail(LOCAL_NAME, EXT_SMTP_HOST+":587", auth, from, []string{to}, data)
 }
 
+func addHeader(name string, value string, mail *[]byte) {
+	*mail = append([]byte(fmt.Sprintf("%s: %s\n", name, value)), *mail...)
+}
+
 func mailHandler(origin net.Addr, from string, to []string, data []byte) {
 	for _, to := range to {
 		log.Printf("sending mail to %s\n", to)
@@ -143,8 +147,9 @@ func mailHandler(origin net.Addr, from string, to []string, data []byte) {
 
 		log.Printf("Received mail %s from %s for %s\n", uuid, from, toAddress.Address)
 
-		messageIdHeader := fmt.Sprintf("Message-Id: %s@%s\n", uuid, domain)
-		data = append([]byte(messageIdHeader), data...)
+		addHeader("Message-Id", fmt.Sprintf("%s@%s\n", uuid, domain), &data)
+		serializedTo := strings.ReplaceAll(to, "@", "=")
+		addHeader("Return-Path", fmt.Sprintf("bounces+%s+%s@%s\n", uuid, serializedTo, domain), &data)
 
 		signedData := data
 
@@ -165,7 +170,7 @@ func mailHandler(origin net.Addr, from string, to []string, data []byte) {
 				return
 			}
 		} else {
-			log.Info("didn't sign email because key was not found")
+			log.Warn("couldn't sign email because key was not found")
 		}
 
 		err = smtpclient.SendMail(LOCAL_NAME, smtpAddr+":25", nil, returnPath, []string{to}, signedData)
