@@ -125,25 +125,25 @@ func mailHandler(origin net.Addr, from string, to []string, data []byte) {
 		}
 		uuid := msg.Header.Get("X-Mailway-Id")
 		domain := msg.Header.Get("X-Mailway-domain")
-		returnPath := msg.Header.Get("Return-Path")
 		file := fmt.Sprintf("/tmp/%s.eml", uuid)
 
 		toAddress, err := parseAddress(to)
 		if err != nil {
-			log.Printf("ParseAddress: %s\n", err)
+			log.Errorf("ParseAddress: %s\n", err)
 			return
 		}
 		smtpAddr, err := findMX(toAddress.domain, 1)
 		if err != nil {
-			log.Printf("findMX: %s\n", err)
+			log.Errorf("findMX: %s\n", err)
 			return
 		}
 
-		log.Printf("Received mail %s from %s for %s\n", uuid, from, toAddress.Address)
+		log.Infof("Received mail %s from %s for %s", uuid, from, toAddress.Address)
 
-		addHeader("Message-Id", fmt.Sprintf("%s@%s\n", uuid, domain), &data)
+		addHeader("Message-Id", fmt.Sprintf("%s@%s", uuid, domain), &data)
 		serializedTo := strings.ReplaceAll(to, "@", "=")
-		addHeader("Return-Path", fmt.Sprintf("bounces+%s+%s@%s\n", uuid, serializedTo, domain), &data)
+		returnPath := fmt.Sprintf("bounces+%s+%s@%s", uuid, serializedTo, domain)
+		addHeader("Return-Path", returnPath, &data)
 
 		signedData := data
 
