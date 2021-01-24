@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mailway-app/config"
+	mconfig "github.com/mailway-app/config"
 	smtpclient "github.com/mailway-app/go-smtp/client"
 	smtpserver "github.com/mailway-app/go-smtp/server"
 
@@ -21,13 +21,7 @@ import (
 	dkim "github.com/toorop/go-dkim"
 )
 
-var (
-	LOCAL_NAME = ""
-
-	EXT_SMTP_USERNAME = os.Getenv("EXT_SMTP_USERNAME")
-	EXT_SMTP_PASSWORD = os.Getenv("EXT_SMTP_PASSWORD")
-	EXT_SMTP_HOST     = os.Getenv("EXT_SMTP_HOST")
-)
+var config *mconfig.Config
 
 func check(err error) {
 	if err != nil {
@@ -97,7 +91,7 @@ func updateMailStatus(domain string, uuid string, status int) error {
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 	}
-	url := fmt.Sprintf("http://127.0.0.1:8081/db/domain/%s/update/%s", domain, uuid)
+	url := fmt.Sprintf("http://127.0.0.1:%d/db/domain/%s/update/%s", config.PortMaildb, domain, uuid)
 	body := fmt.Sprintf("{\"status\":%d}", status)
 	req, err := http.NewRequest(http.MethodPut, url, strings.NewReader(body))
 	if err != nil {
@@ -113,8 +107,8 @@ func updateMailStatus(domain string, uuid string, status int) error {
 }
 
 func sendMailgun(from string, to string, data []byte) error {
-	auth := netsmtp.PlainAuth("", EXT_SMTP_USERNAME, EXT_SMTP_PASSWORD, EXT_SMTP_HOST)
-	return smtpclient.SendMail(LOCAL_NAME, EXT_SMTP_HOST+":587", auth, from, []string{to}, data)
+	auth := netsmtp.PlainAuth("", config.OutSMTPUsername, config.OutSMTPPassword, config.OutSMTPHost)
+	return smtpclient.SendMail(config.InstanceHostname, config.OutSMTPHost+":587", auth, from, []string{to}, data)
 }
 
 func addHeader(name string, value string, mail *[]byte) {
@@ -173,7 +167,7 @@ func mailHandler(origin net.Addr, from string, to []string, data []byte) {
 			log.Warn("couldn't sign email because key was not found")
 		}
 
-		err = smtpclient.SendMail(LOCAL_NAME, smtpAddr+":25", nil, returnPath, []string{to}, signedData)
+		err = smtpclient.SendMail(config.InstanceHostname, smtpAddr+":25", nil, returnPath, []string{to}, signedData)
 		if err != nil {
 			log.Printf("SendMail: %s\n", err)
 
@@ -194,15 +188,15 @@ func mailHandler(origin net.Addr, from string, to []string, data []byte) {
 }
 
 func main() {
-	c, err := config.Read()
+	c, err := mconfig.Read()
 	if err != nil {
 		panic(err)
 	}
 
-	if c.IntanceHostname == "" {
+	if c.InstanceHostname == "" {
 		panic("instance hostname is needed")
 	}
-	LOCAL_NAME = c.IntanceHostname
+	config = c
 
 	if err := Run("127.0.0.1:2525", mailHandler, rcptHandler); err != nil {
 		log.Fatal(err)
