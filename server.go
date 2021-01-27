@@ -148,8 +148,8 @@ func mailHandler(origin net.Addr, from string, to []string, data []byte) {
 		signedData := data
 
 		options := dkim.NewSigOptions()
-		if _, err := os.Stat("/etc/ssl/dkim-external.pem"); !os.IsNotExist(err) {
-			privateKey, err := ioutil.ReadFile("/etc/ssl/dkim-external.pem")
+		if _, err := os.Stat(config.OutDKIMPath); !os.IsNotExist(err) {
+			privateKey, err := ioutil.ReadFile(config.OutDKIMPath)
 			check(err)
 			options.PrivateKey = privateKey
 			options.Domain = domain
@@ -164,7 +164,7 @@ func mailHandler(origin net.Addr, from string, to []string, data []byte) {
 				return
 			}
 		} else {
-			log.Warn("couldn't sign email because key was not found")
+			log.Warnf("couldn't sign email because key was not found at: %s", config.OutDKIMPath)
 		}
 
 		err = smtpclient.SendMail(config.InstanceHostname, smtpAddr+":25", nil, returnPath, []string{to}, signedData)

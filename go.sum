@@ -3,6 +3,8 @@ github.com/mailway-app/config v0.0.0-20210121225025-7cbdff540c0c h1:GdXYKuue3Z0x
 github.com/mailway-app/config v0.0.0-20210121225025-7cbdff540c0c/go.mod h1:7Uxyjt0aFj34+PEBfhaPGomhPav4UKbtCD6J9z17sz4=
 github.com/mailway-app/config v0.0.0-20210124215449-71805b1f709d h1:jQrR3OCeHHxjwClak6VJMv1mQjfV1IfwYXgDCoYGWaE=
 github.com/mailway-app/config v0.0.0-20210124215449-71805b1f709d/go.mod h1:7Uxyjt0aFj34+PEBfhaPGomhPav4UKbtCD6J9z17sz4=
+github.com/mailway-app/config v0.0.0-20210127085910-a38e80cb08c4 h1:lAIlspEhmRR2lw3wLocHvr7mI3Co15u5+sPRV1ymtcA=
+github.com/mailway-app/config v0.0.0-20210127085910-a38e80cb08c4/go.mod h1:7Uxyjt0aFj34+PEBfhaPGomhPav4UKbtCD6J9z17sz4=
 github.com/mailway-app/go-smtp v0.0.0-20210117122148-cdf8523d438b h1:Jpbfa3PPd9Gf/wbZPehwj7VmIGBHci1EcfEdqcnvbiI=
 github.com/mailway-app/go-smtp v0.0.0-20210117122148-cdf8523d438b/go.mod h1:wuKVYDGqdo+qYGaG8AQNNxxcpH0FYAxvtbtB4quHfj4=
 github.com/mailway-app/go-smtp v0.0.0-20210117122827-d2d844bd5f2d h1:paxbFAzj6Li8j9prUGMjHkYcJSaKiO0poxcWbHUp6n4=
