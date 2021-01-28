@@ -68,7 +68,7 @@ func Run(addr string, handler smtpserver.Handler, rcpt smtpserver.HandlerRcpt) e
 		Handler:     handler,
 		HandlerRcpt: rcpt,
 		Appname:     "fwdr",
-		Hostname:    "mailout.mailway.app",
+		Hostname:    config.InstanceHostname,
 		Timeout:     10 * time.Second,
 		LogRead:     logger,
 		LogWrite:    logger,
@@ -147,8 +147,8 @@ func mailHandler(origin net.Addr, from string, to []string, data []byte) {
 
 		signedData := data
 
-		options := dkim.NewSigOptions()
 		if _, err := os.Stat(config.OutDKIMPath); !os.IsNotExist(err) {
+			options := dkim.NewSigOptions()
 			privateKey, err := ioutil.ReadFile(config.OutDKIMPath)
 			check(err)
 			options.PrivateKey = privateKey
