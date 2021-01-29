@@ -15,13 +15,22 @@ import (
 
 	mconfig "github.com/mailway-app/config"
 	smtpclient "github.com/mailway-app/go-smtp/client"
-	smtpserver "github.com/mailway-app/go-smtp/server"
 
+	"github.com/mhale/smtpd"
 	log "github.com/sirupsen/logrus"
 	dkim "github.com/toorop/go-dkim"
 )
 
-var config *mconfig.Config
+var (
+	config       *mconfig.Config
+	unknownError = errors.New("unknown error")
+)
+
+const INT_HEADER_PREFIX = "Mw-Int-"
+
+var HEADERS_TO_REMOVE = []string{
+	"X-Mailgun-Sending-Ip",
+}
 
 func check(err error) {
 	if err != nil {
@@ -61,13 +70,13 @@ func logger(remoteIP, verb, line string) {
 	log.Printf("%s %s %s\n", remoteIP, verb, line)
 }
 
-func Run(addr string, handler smtpserver.Handler, rcpt smtpserver.HandlerRcpt) error {
-	smtpserver.Debug = true
-	srv := &smtpserver.Server{
+func Run(addr string, handler smtpd.Handler, rcpt smtpd.HandlerRcpt) error {
+	smtpd.Debug = true
+	srv := &smtpd.Server{
 		Addr:        addr,
 		Handler:     handler,
 		HandlerRcpt: rcpt,
-		Appname:     "fwdr",
+		Appname:     "mailout",
 		Hostname:    config.InstanceHostname,
 		Timeout:     10 * time.Second,
 		LogRead:     logger,
@@ -111,17 +120,43 @@ func sendMailgun(from string, to string, data []byte) error {
 	return smtpclient.SendMail(config.InstanceHostname, config.OutSMTPHost+":587", auth, from, []string{to}, data)
 }
 
-func addHeader(name string, value string, mail *[]byte) {
-	*mail = append([]byte(fmt.Sprintf("%s: %s\n", name, value)), *mail...)
+func shouldRemoveHeader(n string) bool {
+	for _, b := range HEADERS_TO_REMOVE {
+		if strings.EqualFold(n, b) {
+			return true
+		}
+	}
+	return false
 }
 
-func mailHandler(origin net.Addr, from string, to []string, data []byte) {
+func mailToString(m *mail.Message) string {
+	headers := make([]string, 0)
+	for k, vs := range m.Header {
+		if !strings.HasPrefix(k, INT_HEADER_PREFIX) && !shouldRemoveHeader(k) {
+			for _, v := range vs {
+				headers = append(headers, fmt.Sprintf("%s: %s", k, v))
+			}
+		}
+	}
+	out := strings.Join(headers, "\n")
+	out += "\r\n\r\n"
+
+	buf := new(bytes.Buffer)
+	if _, err := buf.ReadFrom(m.Body); err != nil {
+		log.Errorf("buffer ReadFrom error: %s", err)
+	}
+	out += buf.String()
+
+	return out
+}
+
+func mailHandler(origin net.Addr, from string, to []string, in []byte) error {
 	for _, to := range to {
 		log.Printf("sending mail to %s\n", to)
-		msg, err := mail.ReadMessage(bytes.NewReader(data))
+		msg, err := mail.ReadMessage(bytes.NewReader(in))
 		if err != nil {
 			log.Printf("failed to parse email: %s\n", err)
-			return
+			return unknownError
 		}
 		uuid := msg.Header.Get("X-Mailway-Id")
 		domain := msg.Header.Get("X-Mailway-domain")
@@ -130,22 +165,22 @@ func mailHandler(origin net.Addr, from string, to []string, data []byte) {
 		toAddress, err := parseAddress(to)
 		if err != nil {
 			log.Errorf("ParseAddress: %s\n", err)
-			return
+			return unknownError
 		}
 		smtpAddr, err := findMX(toAddress.domain, 1)
 		if err != nil {
 			log.Errorf("findMX: %s\n", err)
-			return
+			return unknownError
 		}
 
-		log.Infof("Received mail %s from %s for %s", uuid, from, toAddress.Address)
+		msg.Header["Message-Id"] = []string{fmt.Sprintf("%s@%s", uuid, domain)}
 
-		addHeader("Message-Id", fmt.Sprintf("%s@%s", uuid, domain), &data)
 		serializedTo := strings.ReplaceAll(to, "@", "=")
 		returnPath := fmt.Sprintf("bounces+%s+%s@%s", uuid, serializedTo, domain)
-		addHeader("Return-Path", returnPath, &data)
+		msg.Header["Return-Path"] = []string{returnPath}
 
-		signedData := data
+		outMail := mailToString(msg)
+		signedData := []byte(outMail)
 
 		if _, err := os.Stat(config.OutDKIMPath); !os.IsNotExist(err) {
 			options := dkim.NewSigOptions()
@@ -153,15 +188,16 @@ func mailHandler(origin net.Addr, from string, to []string, data []byte) {
 			check(err)
 			options.PrivateKey = privateKey
 			options.Domain = domain
+			options.Algo = "rsa-sha256"
 			options.Selector = "smtp"
 			options.SignatureExpireIn = 3600
-			options.Headers = []string{"Content-Type", "To", "Subject", "Message-ID", "Date", "From", "MIME-Version", "Sender"}
+			options.Headers = []string{"Content-Type", "To", "Subject", "Message-Id", "Date", "From", "MIME-Version", "Sender"}
 			options.AddSignatureTimestamp = true
 			options.Canonicalization = "relaxed/relaxed"
 			err = dkim.Sign(&signedData, options)
 			if err != nil {
 				log.Printf("could not sign email: %s\n", err)
-				return
+				return unknownError
 			}
 		} else {
 			log.Warnf("couldn't sign email because key was not found at: %s", config.OutDKIMPath)
@@ -171,7 +207,7 @@ func mailHandler(origin net.Addr, from string, to []string, data []byte) {
 		if err != nil {
 			log.Printf("SendMail: %s\n", err)
 
-			err = sendMailgun(from, to, data)
+			err = sendMailgun(from, to, []byte(outMail))
 			if err != nil {
 				log.Printf("sendMailgun: %s\n", err)
 			} else {
@@ -185,6 +221,8 @@ func mailHandler(origin net.Addr, from string, to []string, data []byte) {
 			check(os.Remove(file))
 		}
 	}
+
+	return nil
 }
 
 func main() {

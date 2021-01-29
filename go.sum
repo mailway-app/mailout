@@ -11,6 +11,8 @@ github.com/mailway-app/go-smtp v0.0.0-20210117122827-d2d844bd5f2d h1:paxbFAzj6Li
 github.com/mailway-app/go-smtp v0.0.0-20210117122827-d2d844bd5f2d/go.mod h1:wuKVYDGqdo+qYGaG8AQNNxxcpH0FYAxvtbtB4quHfj4=
 github.com/mailway-app/go-smtp v0.0.0-20210117125923-40dda0c2eb2a h1:gLwGdXErgLq+k+VXhEuLjV+yvYlJFAVAwVShpGjmiZ0=
 github.com/mailway-app/go-smtp v0.0.0-20210117125923-40dda0c2eb2a/go.mod h1:wuKVYDGqdo+qYGaG8AQNNxxcpH0FYAxvtbtB4quHfj4=
+github.com/mhale/smtpd v0.0.0-20210122183336-433a5138f756 h1:R2atRIaJkS3hxEGdyA2T8eLc/f5fRX7P1ZlodpCnRV4=
+github.com/mhale/smtpd v0.0.0-20210122183336-433a5138f756/go.mod h1:qqKwvL5sfYgFxcMy96Kjx3TCorMfDaQBvmEL2nvdidc=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=
 github.com/pkg/errors v0.9.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
