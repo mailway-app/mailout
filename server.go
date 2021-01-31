@@ -139,7 +139,7 @@ func mailToString(m *mail.Message) string {
 			}
 		}
 	}
-	out := strings.Join(headers, "\n")
+	out := strings.Join(headers, "\r\n")
 	out += "\r\n\r\n"
 
 	buf := new(bytes.Buffer)
@@ -194,7 +194,7 @@ func mailHandler(origin net.Addr, from string, to []string, in []byte) error {
 			options.SignatureExpireIn = 3600
 			options.Headers = []string{"Content-Type", "To", "Subject", "Message-Id", "Date", "From", "MIME-Version", "Sender"}
 			options.AddSignatureTimestamp = true
-			options.Canonicalization = "relaxed/relaxed"
+			options.Canonicalization = "simple/simple"
 			err = dkim.Sign(&signedData, options)
 			if err != nil {
 				log.Printf("could not sign email: %s\n", err)
