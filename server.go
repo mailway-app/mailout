@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -10,6 +9,7 @@ import (
 	"net/mail"
 	netsmtp "net/smtp"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +17,7 @@ import (
 	smtpclient "github.com/mailway-app/go-smtp/client"
 
 	"github.com/mhale/smtpd"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	dkim "github.com/toorop/go-dkim"
 )
@@ -115,7 +116,7 @@ func updateMailStatus(domain string, uuid string, status int) error {
 	return nil
 }
 
-func sendMailgun(from string, to string, data []byte) error {
+func sendAltSmtp(from string, to string, data []byte) error {
 	auth := netsmtp.PlainAuth("", config.OutSMTPUsername, config.OutSMTPPassword, config.OutSMTPHost)
 	return smtpclient.SendMail(config.InstanceHostname, config.OutSMTPHost+":587", auth, from, []string{to}, data)
 }
@@ -205,15 +206,24 @@ func mailHandler(origin net.Addr, from string, to []string, in []byte) error {
 
 		err = smtpclient.SendMail(config.InstanceHostname, smtpAddr+":25", nil, returnPath, []string{to}, signedData)
 		if err != nil {
-			log.Printf("SendMail: %s\n", err)
+			details, parseErr := parseSendError(err)
+			if parseErr != nil {
+				log.Warnf("could not parse smtp response: %s. Got: %s", parseErr, err)
+			}
 
-			err = sendMailgun(from, to, []byte(outMail))
-			if err != nil {
-				log.Printf("sendMailgun: %s\n", err)
-			} else {
-				log.Println("mail sent with mailgun")
-				check(updateMailStatus(domain, uuid, 2))
-				check(os.Remove(file))
+			if details != nil {
+				log.Infof("SendMail returned %d %d", details.code, details.enhancedCode)
+			}
+
+			if details == nil || details.shouldTryAltSmtp() {
+				log.Infof("trying with alternative smtp")
+				if err := sendAltSmtp(from, to, []byte(outMail)); err != nil {
+					log.Fatalf("sendAltSmtp: %s\n", err)
+				} else {
+					log.Debugf("mail sent with alternative smtp")
+					check(updateMailStatus(domain, uuid, 2))
+					check(os.Remove(file))
+				}
 			}
 		} else {
 			log.Printf("Mail sent with own\n")
@@ -223,6 +233,55 @@ func mailHandler(origin net.Addr, from string, to []string, in []byte) error {
 	}
 
 	return nil
+}
+
+type enhancedCode [3]int
+
+type sendResult struct {
+	code         int
+	enhancedCode enhancedCode
+	msg          string
+}
+
+func (r sendResult) isTransientFailure() bool {
+	return r.enhancedCode[0] == 4
+}
+func (r sendResult) isPermanentFailure() bool {
+	return r.enhancedCode[0] == 5
+}
+func (r sendResult) shouldTryAltSmtp() bool {
+	// Gmail specific: https://support.google.com/a/answer/3726730?hl=en
+	if strings.Contains(r.msg, "this message has been blocked") {
+		return false
+	}
+	// Mailbox Status
+	if r.enhancedCode[0] == 5 && r.enhancedCode[1] == 2 {
+		return false
+	}
+	return true
+}
+
+func parseSendError(input error) (*sendResult, error) {
+	parts := strings.SplitN(input.Error(), " ", 3)
+
+	code, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return nil, errors.Wrap(err, "could not parse error code")
+	}
+
+	var enhancedCode enhancedCode
+
+	enhancedCodeParts := strings.SplitN(parts[1], ".", 3)
+	for i, str := range enhancedCodeParts {
+		n, err := strconv.Atoi(str)
+		if err != nil {
+			return nil, errors.Wrap(err, "could not parse enhanced error code")
+		}
+		enhancedCode[i] = n
+	}
+	msg := parts[2]
+
+	return &sendResult{code, enhancedCode, msg}, nil
 }
 
 func main() {
