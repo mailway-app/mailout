@@ -2,12 +2,15 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/pkg/errors"
 )
 
-func updateMailStatus(domain string, uuid string, status int) error {
+func updateMailStatus(jwt string, domain string, uuid string, status int) error {
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 	}
@@ -18,10 +21,21 @@ func updateMailStatus(domain string, uuid string, status int) error {
 		return err
 	}
 
-	_, err = client.Do(req)
+	req.Header.Set("Authorization", "Bearer "+jwt)
+	res, err := client.Do(req)
 	if err != nil {
 		return err
 	}
 
+	defer res.Body.Close()
+
+	if res.StatusCode != 200 {
+		bodyBytes, err := ioutil.ReadAll(res.Body)
+		if err != nil {
+			return errors.Wrap(err, "could not read response body")
+		}
+		return errors.Errorf("maildb returned code %d: %s", res.StatusCode, bodyBytes)
+	}
 	return nil
+
 }

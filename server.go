@@ -205,18 +205,18 @@ func mailHandler(origin net.Addr, from string, to []string, in []byte) error {
 				log.Infof("trying with alternative smtp")
 				if err := sendAltSmtp(from, to, []byte(outMail)); err != nil {
 					log.Errorf("sendAltSmtp: %s\n", err)
-					check(updateMailStatus(domain, uuid, MAIL_STATUS_DELIVERY_ERROR))
+					check(updateMailStatus(config.ServerJWT, domain, uuid, MAIL_STATUS_DELIVERY_ERROR))
 				} else {
 					log.Debugf("mail sent with alternative smtp")
-					check(updateMailStatus(domain, uuid, MAIL_STATUS_DELIVERED))
+					check(updateMailStatus(config.ServerJWT, domain, uuid, MAIL_STATUS_DELIVERED))
 					check(os.Remove(file))
 				}
 			} else {
-				check(updateMailStatus(domain, uuid, MAIL_STATUS_DELIVERY_ERROR))
+				check(updateMailStatus(config.ServerJWT, domain, uuid, MAIL_STATUS_DELIVERY_ERROR))
 			}
 		} else {
 			log.Printf("Mail sent with own\n")
-			check(updateMailStatus(domain, uuid, MAIL_STATUS_DELIVERED))
+			check(updateMailStatus(config.ServerJWT, domain, uuid, MAIL_STATUS_DELIVERED))
 			check(os.Remove(file))
 		}
 	}
