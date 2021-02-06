@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net"
-	"net/http"
 	"net/mail"
 	netsmtp "net/smtp"
 	"os"
@@ -27,7 +26,15 @@ var (
 	unknownError = errors.New("unknown error")
 )
 
-const INT_HEADER_PREFIX = "Mw-Int-"
+const (
+	INT_HEADER_PREFIX = "Mw-Int-"
+
+	// MAIL_STATUS_RECEIVED  = 0
+	// MAIL_STATUS_PROCESSED = 1
+	MAIL_STATUS_DELIVERED = 2
+	// MAIL_STATUS_SPAM = 3
+	MAIL_STATUS_DELIVERY_ERROR = 4
+)
 
 var HEADERS_TO_REMOVE = []string{
 	"X-Mailgun-Sending-Ip",
@@ -95,25 +102,6 @@ func findMX(domain string, pref int) (string, error) {
 	// FIXME: implement selection based on pref. Sort by pref and input pref is the
 	// top n
 	return "", errors.New("No suitable MX found")
-}
-
-func updateMailStatus(domain string, uuid string, status int) error {
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-	}
-	url := fmt.Sprintf("http://127.0.0.1:%d/db/domain/%s/update/%s", config.PortMaildb, domain, uuid)
-	body := fmt.Sprintf("{\"status\":%d}", status)
-	req, err := http.NewRequest(http.MethodPut, url, strings.NewReader(body))
-	if err != nil {
-		return err
-	}
-
-	_, err = client.Do(req)
-	if err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func sendAltSmtp(from string, to string, data []byte) error {
@@ -194,7 +182,7 @@ func mailHandler(origin net.Addr, from string, to []string, in []byte) error {
 			options.SignatureExpireIn = 3600
 			options.Headers = []string{"Content-Type", "To", "Subject", "Message-Id", "Date", "From", "MIME-Version", "Sender"}
 			options.AddSignatureTimestamp = true
-			options.Canonicalization = "simple/simple"
+			options.Canonicalization = "relaxed/relaxed"
 			err = dkim.Sign(&signedData, options)
 			if err != nil {
 				log.Printf("could not sign email: %s\n", err)
@@ -206,28 +194,29 @@ func mailHandler(origin net.Addr, from string, to []string, in []byte) error {
 
 		err = smtpclient.SendMail(config.InstanceHostname, smtpAddr+":25", nil, returnPath, []string{to}, signedData)
 		if err != nil {
-			details, parseErr := parseSendError(err)
+			errDetails, parseErr := parseSendError(err)
 			if parseErr != nil {
 				log.Warnf("could not parse smtp response: %s. Got: %s", parseErr, err)
+			} else {
+				log.Infof("SendMail returned %d %d", errDetails.code, errDetails.enhancedCode)
 			}
 
-			if details != nil {
-				log.Infof("SendMail returned %d %d", details.code, details.enhancedCode)
-			}
-
-			if details == nil || details.shouldTryAltSmtp() {
+			if errDetails == nil || errDetails.shouldTryAltSmtp() {
 				log.Infof("trying with alternative smtp")
 				if err := sendAltSmtp(from, to, []byte(outMail)); err != nil {
-					log.Fatalf("sendAltSmtp: %s\n", err)
+					log.Errorf("sendAltSmtp: %s\n", err)
+					check(updateMailStatus(domain, uuid, MAIL_STATUS_DELIVERY_ERROR))
 				} else {
 					log.Debugf("mail sent with alternative smtp")
-					check(updateMailStatus(domain, uuid, 2))
+					check(updateMailStatus(domain, uuid, MAIL_STATUS_DELIVERED))
 					check(os.Remove(file))
 				}
+			} else {
+				check(updateMailStatus(domain, uuid, MAIL_STATUS_DELIVERY_ERROR))
 			}
 		} else {
 			log.Printf("Mail sent with own\n")
-			check(updateMailStatus(domain, uuid, 2))
+			check(updateMailStatus(domain, uuid, MAIL_STATUS_DELIVERED))
 			check(os.Remove(file))
 		}
 	}
