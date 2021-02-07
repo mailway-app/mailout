@@ -86,7 +86,7 @@ func Run(addr string, handler smtpd.Handler, rcpt smtpd.HandlerRcpt) error {
 		HandlerRcpt: rcpt,
 		Appname:     "mailout",
 		Hostname:    config.InstanceHostname,
-		Timeout:     10 * time.Second,
+		Timeout:     3 * time.Minute,
 		LogRead:     logger,
 		LogWrite:    logger,
 	}
