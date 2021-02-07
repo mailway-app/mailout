@@ -1,5 +1,6 @@
 VERSION = 1.0.0
 DIST = $(PWD)/dist
+FPM_ARGS =
 
 .PHONY: test
 test:
@@ -15,4 +16,4 @@ $(DIST)/mailout: server.go
 
 .PHONY: deb
 deb: $(DIST)/mailout
-	fpm -n mailout -s dir -t deb --chdir=$(DIST) --version=$(VERSION)
+	fpm -n mailout -s dir -t deb --chdir=$(DIST) --version=$(VERSION) $(FPM_ARGS)
