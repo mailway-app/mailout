@@ -106,7 +106,12 @@ func findMX(domain string, pref int) (string, error) {
 
 func sendAltSmtp(from string, to string, data []byte) error {
 	auth := netsmtp.PlainAuth("", config.OutSMTPUsername, config.OutSMTPPassword, config.OutSMTPHost)
-	return smtpclient.SendMail(config.InstanceHostname, config.OutSMTPHost+":587", auth, from, []string{to}, data)
+	port := config.OutSMTPPort
+	if port == 0 {
+		port = 587
+	}
+	addr := fmt.Sprintf("%s:%d", config.OutSMTPHost, port)
+	return smtpclient.SendMail(config.InstanceHostname, addr, auth, from, []string{to}, data)
 }
 
 func shouldRemoveHeader(n string) bool {
