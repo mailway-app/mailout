@@ -197,7 +197,7 @@ func mailHandler(origin net.Addr, from string, to []string, in []byte) error {
 			log.Warnf("couldn't sign email because key was not found at: %s", config.OutDKIMPath)
 		}
 
-		err = smtpclient.SendMail(config.InstanceHostname, smtpAddr+":25", nil, returnPath, []string{to}, signedData)
+		err = smtpclient.SendMail(config.InstanceHostname, smtpAddr+":587", nil, returnPath, []string{to}, signedData)
 		if err != nil {
 			errDetails, parseErr := parseSendError(err)
 			if parseErr != nil {
