@@ -42,7 +42,7 @@ var HEADERS_TO_REMOVE = []string{
 
 func check(err error) {
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 }
 
@@ -281,11 +281,13 @@ func parseSendError(input error) (*sendResult, error) {
 func main() {
 	c, err := mconfig.Read()
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
+	log.SetLevel(c.GetLogLevel())
+	log.SetFormatter(c.GetLogFormat())
 
 	if c.InstanceHostname == "" {
-		panic("instance hostname is needed")
+		log.Fatal("instance hostname is needed")
 	}
 	config = c
 
