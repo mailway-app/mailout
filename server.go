@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"io/ioutil"
@@ -27,8 +28,6 @@ var (
 )
 
 const (
-	INT_HEADER_PREFIX = "Mw-Int-"
-
 	// MAIL_STATUS_RECEIVED  = 0
 	// MAIL_STATUS_PROCESSED = 1
 	MAIL_STATUS_DELIVERED = 2
@@ -36,9 +35,11 @@ const (
 	MAIL_STATUS_DELIVERY_ERROR = 4
 )
 
-var HEADERS_TO_REMOVE = []string{
-	"X-Mailgun-Sending-Ip",
-}
+// headers to strip out before sending. In lower case.
+var (
+	X_MAILGUN_SENDING_IP = []byte("x-mailgun-sending-ip")
+	INT_HEADER_PREFIX    = []byte("mw-int-")
+)
 
 func check(err error) {
 	if err != nil {
@@ -114,34 +115,29 @@ func sendAltSmtp(from string, to string, data []byte) error {
 	return smtpclient.SendMail(config.InstanceHostname, addr, auth, from, []string{to}, data)
 }
 
-func shouldRemoveHeader(n string) bool {
-	for _, b := range HEADERS_TO_REMOVE {
-		if strings.EqualFold(n, b) {
-			return true
+// Prepare email to be sent outside
+func prepareEmail(mail []byte) ([]byte, error) {
+	out := make([]byte, 0)
+	newline := []byte{'\r', '\n'}
+
+	scanner := bufio.NewScanner(bytes.NewReader(mail))
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		lowerCaseline := bytes.ToLower(line)
+		if bytes.HasPrefix(lowerCaseline, INT_HEADER_PREFIX) ||
+			bytes.HasPrefix(lowerCaseline, X_MAILGUN_SENDING_IP) {
+			continue // ignore line
 		}
-	}
-	return false
-}
 
-func mailToString(m *mail.Message) string {
-	headers := make([]string, 0)
-	for k, vs := range m.Header {
-		if !strings.HasPrefix(k, INT_HEADER_PREFIX) && !shouldRemoveHeader(k) {
-			for _, v := range vs {
-				headers = append(headers, fmt.Sprintf("%s: %s", k, v))
-			}
-		}
+		out = append(out, line...)
+		out = append(out, newline...)
 	}
-	out := strings.Join(headers, "\r\n")
-	out += "\r\n\r\n"
 
-	buf := new(bytes.Buffer)
-	if _, err := buf.ReadFrom(m.Body); err != nil {
-		log.Errorf("buffer ReadFrom error: %s", err)
+	if err := scanner.Err(); err != nil {
+		return out, errors.Wrap(err, "could not read message")
 	}
-	out += buf.String()
 
-	return out
+	return out, nil
 }
 
 func mailHandler(origin net.Addr, from string, to []string, in []byte) error {
@@ -152,8 +148,8 @@ func mailHandler(origin net.Addr, from string, to []string, in []byte) error {
 			log.Printf("failed to parse email: %s\n", err)
 			return unknownError
 		}
-		uuid := msg.Header.Get("X-Mailway-Id")
-		domain := msg.Header.Get("X-Mailway-domain")
+		uuid := msg.Header.Get("Mw-Int-Id")
+		domain := msg.Header.Get("Mw-Int-Domain")
 		file := fmt.Sprintf("/tmp/%s.eml", uuid)
 
 		toAddress, err := parseAddress(to)
@@ -167,14 +163,14 @@ func mailHandler(origin net.Addr, from string, to []string, in []byte) error {
 			return unknownError
 		}
 
-		msg.Header["Message-Id"] = []string{fmt.Sprintf("%s@%s", uuid, domain)}
-
 		serializedTo := strings.ReplaceAll(to, "@", "=")
 		returnPath := fmt.Sprintf("bounces+%s+%s@%s", uuid, serializedTo, domain)
-		msg.Header["Return-Path"] = []string{returnPath}
 
-		outMail := mailToString(msg)
-		signedData := []byte(outMail)
+		outMail, err := prepareEmail(in)
+		if err != nil {
+			return errors.Wrap(err, "could not prepare email for sending")
+		}
+		signedData := outMail
 
 		if _, err := os.Stat(config.OutDKIMPath); !os.IsNotExist(err) {
 			options := dkim.NewSigOptions()
@@ -185,12 +181,12 @@ func mailHandler(origin net.Addr, from string, to []string, in []byte) error {
 			options.Algo = "rsa-sha256"
 			options.Selector = "smtp"
 			options.SignatureExpireIn = 3600
-			options.Headers = []string{"Content-Type", "To", "Subject", "Message-Id", "Date", "From", "MIME-Version", "Sender"}
+			options.Headers = []string{"Content-Type", "To", "Subject", "Date", "From", "MIME-Version", "Sender"}
 			options.AddSignatureTimestamp = true
 			options.Canonicalization = "relaxed/relaxed"
 			err = dkim.Sign(&signedData, options)
 			if err != nil {
-				log.Printf("could not sign email: %s\n", err)
+				log.Errorf("could not sign email: %s\n", err)
 				return unknownError
 			}
 		} else {
@@ -208,7 +204,7 @@ func mailHandler(origin net.Addr, from string, to []string, in []byte) error {
 
 			if errDetails == nil || errDetails.shouldTryAltSmtp() {
 				log.Infof("trying with alternative smtp")
-				if err := sendAltSmtp(from, to, []byte(outMail)); err != nil {
+				if err := sendAltSmtp(from, to, outMail); err != nil {
 					log.Errorf("sendAltSmtp: %s\n", err)
 					check(updateMailStatus(config.ServerJWT, domain, uuid, MAIL_STATUS_DELIVERY_ERROR))
 				} else {
