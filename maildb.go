@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	config "github.com/mailway-app/config"
+
 	"github.com/pkg/errors"
 )
 
@@ -14,7 +16,7 @@ func updateMailStatus(jwt string, domain string, uuid string, status int) error 
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 	}
-	url := fmt.Sprintf("http://127.0.0.1:%d/db/domain/%s/update/%s", config.PortMaildb, domain, uuid)
+	url := fmt.Sprintf("http://127.0.0.1:%d/db/domain/%s/update/%s", config.CurrConfig.PortMaildb, domain, uuid)
 	body := fmt.Sprintf("{\"status\":%d}", status)
 	req, err := http.NewRequest(http.MethodPut, url, strings.NewReader(body))
 	if err != nil {

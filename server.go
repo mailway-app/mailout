@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	mconfig "github.com/mailway-app/config"
+	config "github.com/mailway-app/config"
 	smtpclient "github.com/mailway-app/go-smtp/client"
 
 	"github.com/mhale/smtpd"
@@ -23,7 +23,6 @@ import (
 )
 
 var (
-	config       *mconfig.Config
 	unknownError = errors.New("unknown error")
 )
 
@@ -86,7 +85,7 @@ func Run(addr string, handler smtpd.Handler, rcpt smtpd.HandlerRcpt) error {
 		Handler:     handler,
 		HandlerRcpt: rcpt,
 		Appname:     "mailout",
-		Hostname:    config.InstanceHostname,
+		Hostname:    config.CurrConfig.InstanceHostname,
 		Timeout:     3 * time.Minute,
 		LogRead:     logger,
 		LogWrite:    logger,
@@ -106,13 +105,13 @@ func findMX(domain string, pref int) (string, error) {
 }
 
 func sendAltSmtp(from string, to string, data []byte) error {
-	auth := netsmtp.PlainAuth("", config.OutSMTPUsername, config.OutSMTPPassword, config.OutSMTPHost)
-	port := config.OutSMTPPort
+	auth := netsmtp.PlainAuth("", config.CurrConfig.OutSMTPUsername, config.CurrConfig.OutSMTPPassword, config.CurrConfig.OutSMTPHost)
+	port := config.CurrConfig.OutSMTPPort
 	if port == 0 {
 		port = 587
 	}
-	addr := fmt.Sprintf("%s:%d", config.OutSMTPHost, port)
-	return smtpclient.SendMail(config.InstanceHostname, addr, auth, from, []string{to}, data)
+	addr := fmt.Sprintf("%s:%d", config.CurrConfig.OutSMTPHost, port)
+	return smtpclient.SendMail(config.CurrConfig.InstanceHostname, addr, auth, from, []string{to}, data)
 }
 
 // Prepare email to be sent outside
@@ -172,9 +171,9 @@ func mailHandler(origin net.Addr, from string, to []string, in []byte) error {
 		}
 		signedData := outMail
 
-		if _, err := os.Stat(config.OutDKIMPath); !os.IsNotExist(err) {
+		if _, err := os.Stat(config.CurrConfig.OutDKIMPath); !os.IsNotExist(err) {
 			options := dkim.NewSigOptions()
-			privateKey, err := ioutil.ReadFile(config.OutDKIMPath)
+			privateKey, err := ioutil.ReadFile(config.CurrConfig.OutDKIMPath)
 			check(err)
 			options.PrivateKey = privateKey
 			options.Domain = domain
@@ -190,10 +189,10 @@ func mailHandler(origin net.Addr, from string, to []string, in []byte) error {
 				return unknownError
 			}
 		} else {
-			log.Warnf("couldn't sign email because key was not found at: %s", config.OutDKIMPath)
+			log.Warnf("couldn't sign email because key was not found at: %s", config.CurrConfig.OutDKIMPath)
 		}
 
-		err = smtpclient.SendMail(config.InstanceHostname, smtpAddr+":25", nil, returnPath, []string{to}, signedData)
+		err = smtpclient.SendMail(config.CurrConfig.InstanceHostname, smtpAddr+":25", nil, returnPath, []string{to}, signedData)
 		if err != nil {
 			errDetails, parseErr := parseSendError(err)
 			if parseErr != nil {
@@ -206,18 +205,18 @@ func mailHandler(origin net.Addr, from string, to []string, in []byte) error {
 				log.Infof("trying with alternative smtp")
 				if err := sendAltSmtp(from, to, outMail); err != nil {
 					log.Errorf("sendAltSmtp: %s\n", err)
-					check(updateMailStatus(config.ServerJWT, domain, uuid, MAIL_STATUS_DELIVERY_ERROR))
+					check(updateMailStatus(config.CurrConfig.ServerJWT, domain, uuid, MAIL_STATUS_DELIVERY_ERROR))
 				} else {
 					log.Debugf("mail sent with alternative smtp")
-					check(updateMailStatus(config.ServerJWT, domain, uuid, MAIL_STATUS_DELIVERED))
+					check(updateMailStatus(config.CurrConfig.ServerJWT, domain, uuid, MAIL_STATUS_DELIVERED))
 					check(os.Remove(file))
 				}
 			} else {
-				check(updateMailStatus(config.ServerJWT, domain, uuid, MAIL_STATUS_DELIVERY_ERROR))
+				check(updateMailStatus(config.CurrConfig.ServerJWT, domain, uuid, MAIL_STATUS_DELIVERY_ERROR))
 			}
 		} else {
 			log.Printf("Mail sent with own\n")
-			check(updateMailStatus(config.ServerJWT, domain, uuid, MAIL_STATUS_DELIVERED))
+			check(updateMailStatus(config.CurrConfig.ServerJWT, domain, uuid, MAIL_STATUS_DELIVERED))
 			check(os.Remove(file))
 		}
 	}
@@ -275,17 +274,12 @@ func parseSendError(input error) (*sendResult, error) {
 }
 
 func main() {
-	c, err := mconfig.Read()
-	if err != nil {
-		log.Fatal(err)
+	if err := config.Init(); err != nil {
+		log.Fatalf("failed to init config: %s", err)
 	}
-	log.SetLevel(c.GetLogLevel())
-	log.SetFormatter(c.GetLogFormat())
-
-	if c.InstanceHostname == "" {
+	if config.CurrConfig.InstanceHostname == "" {
 		log.Fatal("instance hostname is needed")
 	}
-	config = c
 
 	if err := Run("127.0.0.1:2525", mailHandler, rcptHandler); err != nil {
 		log.Fatal(err)
