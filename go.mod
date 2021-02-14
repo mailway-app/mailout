@@ -3,7 +3,7 @@ module github.com/mailway/smtp-send
 go 1.13
 
 require (
-	github.com/mailway-app/config v0.0.0-20210214145136-8a381a1ce901
+	github.com/mailway-app/config v0.0.0-20210214183823-a092c8c3a426
 	github.com/mailway-app/go-smtp v0.0.0-20210117125923-40dda0c2eb2a
 	github.com/mhale/smtpd v0.0.0-20210122183336-433a5138f756
 	github.com/pkg/errors v0.9.1
