@@ -96,11 +96,24 @@ func Run(addr string, handler smtpd.Handler, rcpt smtpd.HandlerRcpt) error {
 func findMX(domain string, pref int) (string, error) {
 	mxrecords, _ := net.LookupMX(domain)
 	for _, mx := range mxrecords {
-		fmt.Println(mx.Host, mx.Pref)
-		return mx.Host, nil
+		log.Infof("selected %s %d", mx.Host, mx.Pref)
+		return mx.Host + ":25", nil
 	}
 	// FIXME: implement selection based on pref. Sort by pref and input pref is the
 	// top n
+
+	cname, srvAddrs, err := net.LookupSRV("submission", "tcp", domain)
+	if err != nil {
+		log.Debugf("SRV lookup failed: %s", err)
+	}
+	if len(srvAddrs) > 0 {
+		for _, record := range srvAddrs {
+			addr := fmt.Sprintf("%s:%d", record.Target, record.Port)
+			log.Infof("%s selected %s", cname, addr)
+			return addr, nil
+		}
+	}
+
 	return "", errors.New("No suitable MX found")
 }
 
@@ -141,10 +154,10 @@ func prepareEmail(mail []byte) ([]byte, error) {
 
 func mailHandler(origin net.Addr, from string, to []string, in []byte) error {
 	for _, to := range to {
-		log.Printf("sending mail to %s\n", to)
+		log.Printf("sending mail to %s", to)
 		msg, err := mail.ReadMessage(bytes.NewReader(in))
 		if err != nil {
-			log.Printf("failed to parse email: %s\n", err)
+			log.Errorf("failed to parse email: %s", err)
 			return unknownError
 		}
 		uuid := msg.Header.Get("Mw-Int-Id")
@@ -153,12 +166,12 @@ func mailHandler(origin net.Addr, from string, to []string, in []byte) error {
 
 		toAddress, err := parseAddress(to)
 		if err != nil {
-			log.Errorf("ParseAddress: %s\n", err)
+			log.Errorf("ParseAddress: %s", err)
 			return unknownError
 		}
 		smtpAddr, err := findMX(toAddress.domain, 1)
 		if err != nil {
-			log.Errorf("findMX: %s\n", err)
+			log.Errorf("could not findMX: %s", err)
 			return unknownError
 		}
 
@@ -192,7 +205,7 @@ func mailHandler(origin net.Addr, from string, to []string, in []byte) error {
 			log.Warnf("couldn't sign email because key was not found at: %s", config.CurrConfig.OutDKIMPath)
 		}
 
-		err = smtpclient.SendMail(config.CurrConfig.InstanceHostname, smtpAddr+":25", nil, returnPath, []string{to}, signedData)
+		err = smtpclient.SendMail(config.CurrConfig.InstanceHostname, smtpAddr, nil, returnPath, []string{to}, signedData)
 		if err != nil {
 			errDetails, parseErr := parseSendError(err)
 			if parseErr != nil {
@@ -281,7 +294,8 @@ func main() {
 		log.Fatal("instance hostname is needed")
 	}
 
-	if err := Run("127.0.0.1:2525", mailHandler, rcptHandler); err != nil {
+	addr := fmt.Sprintf("127.0.0.1:%d", config.CurrConfig.PortMailout)
+	if err := Run(addr, mailHandler, rcptHandler); err != nil {
 		log.Fatal(err)
 	}
 }

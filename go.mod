@@ -1,4 +1,4 @@
-module github.com/mailway/smtp-send
+module github.com/mailway-app/mailout
 
 go 1.13
 
