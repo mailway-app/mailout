@@ -93,11 +93,36 @@ func Run(addr string, handler smtpd.Handler, rcpt smtpd.HandlerRcpt) error {
 	return srv.ListenAndServe()
 }
 
+func findPort(host string) (int, error) {
+	if testPort(host, 25) {
+		return 25, nil
+	}
+	if testPort(host, 587) {
+		return 587, nil
+	}
+	if testPort(host, 465) {
+		return 465, nil
+	}
+	if testPort(host, 2525) {
+		return 2525, nil
+	}
+	return 0, errors.New("no open SMTP ports")
+}
+
 func findMX(domain string, pref int) (string, error) {
-	mxrecords, _ := net.LookupMX(domain)
+	mxrecords, err := net.LookupMX(domain)
+	if err != nil {
+		log.Debugf("MX lookup failed: %s", err)
+	}
 	for _, mx := range mxrecords {
-		log.Infof("selected %s %d", mx.Host, mx.Pref)
-		return mx.Host + ":25", nil
+		port, err := findPort(mx.Host)
+		if err != nil {
+			log.Warnf("failed to find port for %s: %s", mx.Host, err)
+			continue
+		}
+		addr := fmt.Sprintf("%s:%d", mx.Host, port)
+		log.Infof("selected smtp server %s", addr)
+		return addr, nil
 	}
 	// FIXME: implement selection based on pref. Sort by pref and input pref is the
 	// top n
@@ -125,6 +150,20 @@ func sendAltSmtp(from string, to string, data []byte) error {
 	}
 	addr := fmt.Sprintf("%s:%d", config.CurrConfig.OutSMTPHost, port)
 	return smtpclient.SendMail(config.CurrConfig.InstanceHostname, addr, auth, from, []string{to}, data)
+}
+
+func testPort(host string, port int) bool {
+	timeout := 2 * time.Second
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", host, port), timeout)
+	if err != nil {
+		log.Debugf("failed to connect to %s:%d:: %s", host, port, err)
+		return false
+	}
+	if conn != nil {
+		defer conn.Close()
+		return true
+	}
+	return false
 }
 
 // Prepare email to be sent outside
