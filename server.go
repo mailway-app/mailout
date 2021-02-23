@@ -1,20 +1,16 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 	"io/ioutil"
 	"net"
 	"net/mail"
-	netsmtp "net/smtp"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
 	config "github.com/mailway-app/config"
-	smtpclient "github.com/mailway-app/go-smtp/client"
 
 	"github.com/mhale/smtpd"
 	"github.com/pkg/errors"
@@ -32,12 +28,6 @@ const (
 	MAIL_STATUS_DELIVERED = 2
 	// MAIL_STATUS_SPAM = 3
 	MAIL_STATUS_DELIVERY_ERROR = 4
-)
-
-// headers to strip out before sending. In lower case.
-var (
-	X_MAILGUN_SENDING_IP = []byte("x-mailgun-sending-ip")
-	INT_HEADER_PREFIX    = []byte("mw-int-")
 )
 
 func check(err error) {
@@ -93,104 +83,6 @@ func Run(addr string, handler smtpd.Handler, rcpt smtpd.HandlerRcpt) error {
 	return srv.ListenAndServe()
 }
 
-func findPort(host string) (int, error) {
-	if testPort(host, 25) {
-		return 25, nil
-	}
-	if testPort(host, 587) {
-		return 587, nil
-	}
-	if testPort(host, 465) {
-		return 465, nil
-	}
-	if testPort(host, 2525) {
-		return 2525, nil
-	}
-	return 0, errors.New("no open SMTP ports")
-}
-
-func findMX(domain string, pref int) (string, error) {
-	mxrecords, err := net.LookupMX(domain)
-	if err != nil {
-		log.Debugf("MX lookup failed: %s", err)
-	}
-	for _, mx := range mxrecords {
-		port, err := findPort(mx.Host)
-		if err != nil {
-			log.Warnf("failed to find port for %s: %s", mx.Host, err)
-			continue
-		}
-		addr := fmt.Sprintf("%s:%d", mx.Host, port)
-		log.Infof("selected smtp server %s", addr)
-		return addr, nil
-	}
-	// FIXME: implement selection based on pref. Sort by pref and input pref is the
-	// top n
-
-	cname, srvAddrs, err := net.LookupSRV("submission", "tcp", domain)
-	if err != nil {
-		log.Debugf("SRV lookup failed: %s", err)
-	}
-	if len(srvAddrs) > 0 {
-		for _, record := range srvAddrs {
-			addr := fmt.Sprintf("%s:%d", record.Target, record.Port)
-			log.Infof("%s selected %s", cname, addr)
-			return addr, nil
-		}
-	}
-
-	return "", errors.New("No suitable MX found")
-}
-
-func sendAltSmtp(from string, to string, data []byte) error {
-	auth := netsmtp.PlainAuth("", config.CurrConfig.OutSMTPUsername, config.CurrConfig.OutSMTPPassword, config.CurrConfig.OutSMTPHost)
-	port := config.CurrConfig.OutSMTPPort
-	if port == 0 {
-		port = 587
-	}
-	addr := fmt.Sprintf("%s:%d", config.CurrConfig.OutSMTPHost, port)
-	return smtpclient.SendMail(config.CurrConfig.InstanceHostname, addr, auth, from, []string{to}, data)
-}
-
-func testPort(host string, port int) bool {
-	timeout := 2 * time.Second
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", host, port), timeout)
-	if err != nil {
-		log.Debugf("failed to connect to %s:%d:: %s", host, port, err)
-		return false
-	}
-	if conn != nil {
-		defer conn.Close()
-		return true
-	}
-	return false
-}
-
-// Prepare email to be sent outside
-func prepareEmail(mail []byte) ([]byte, error) {
-	out := make([]byte, 0)
-	newline := []byte{'\r', '\n'}
-
-	scanner := bufio.NewScanner(bytes.NewReader(mail))
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		lowerCaseline := bytes.ToLower(line)
-		if bytes.HasPrefix(lowerCaseline, INT_HEADER_PREFIX) ||
-			bytes.HasPrefix(lowerCaseline, X_MAILGUN_SENDING_IP) {
-			continue // ignore line
-		}
-
-		out = append(out, line...)
-		out = append(out, newline...)
-	}
-
-	if err := scanner.Err(); err != nil {
-		return out, errors.Wrap(err, "could not read message")
-	}
-
-	return out, nil
-}
-
 func mailHandler(origin net.Addr, from string, to []string, in []byte) error {
 	for _, to := range to {
 		log.Printf("sending mail to %s", to)
@@ -208,7 +100,7 @@ func mailHandler(origin net.Addr, from string, to []string, in []byte) error {
 			log.Errorf("ParseAddress: %s", err)
 			return unknownError
 		}
-		smtpAddr, err := findMX(toAddress.domain, 1)
+		smtpServer, err := findMX(toAddress.domain, 1)
 		if err != nil {
 			log.Errorf("could not findMX: %s", err)
 			return unknownError
@@ -244,85 +136,18 @@ func mailHandler(origin net.Addr, from string, to []string, in []byte) error {
 			log.Warnf("couldn't sign email because key was not found at: %s", config.CurrConfig.OutDKIMPath)
 		}
 
-		err = smtpclient.SendMail(config.CurrConfig.InstanceHostname, smtpAddr, nil, returnPath, []string{to}, signedData)
+		err = sendMailToServer(
+			smtpServer, returnPath, from, to, signedData, outMail, domain, uuid)
 		if err != nil {
-			errDetails, parseErr := parseSendError(err)
-			if parseErr != nil {
-				log.Warnf("could not parse smtp response: %s. Got: %s", parseErr, err)
-			} else {
-				log.Infof("SendMail returned %d %d", errDetails.code, errDetails.enhancedCode)
-			}
-
-			if errDetails == nil || errDetails.shouldTryAltSmtp() {
-				log.Infof("trying with alternative smtp")
-				if err := sendAltSmtp(from, to, outMail); err != nil {
-					log.Errorf("sendAltSmtp: %s\n", err)
-					check(updateMailStatus(config.CurrConfig.ServerJWT, domain, uuid, MAIL_STATUS_DELIVERY_ERROR))
-				} else {
-					log.Debugf("mail sent with alternative smtp")
-					check(updateMailStatus(config.CurrConfig.ServerJWT, domain, uuid, MAIL_STATUS_DELIVERED))
-					check(os.Remove(file))
-				}
-			} else {
-				check(updateMailStatus(config.CurrConfig.ServerJWT, domain, uuid, MAIL_STATUS_DELIVERY_ERROR))
-			}
-		} else {
-			log.Printf("Mail sent with own\n")
-			check(updateMailStatus(config.CurrConfig.ServerJWT, domain, uuid, MAIL_STATUS_DELIVERED))
-			check(os.Remove(file))
+			check(updateMailStatus(
+				config.CurrConfig.ServerJWT, domain, uuid, MAIL_STATUS_DELIVERY_ERROR))
+			return errors.Wrap(err, "could not send email")
 		}
+		check(updateMailStatus(config.CurrConfig.ServerJWT, domain, uuid, MAIL_STATUS_DELIVERED))
+		check(os.Remove(file))
 	}
 
 	return nil
-}
-
-type enhancedCode [3]int
-
-type sendResult struct {
-	code         int
-	enhancedCode enhancedCode
-	msg          string
-}
-
-func (r sendResult) isTransientFailure() bool {
-	return r.enhancedCode[0] == 4
-}
-func (r sendResult) isPermanentFailure() bool {
-	return r.enhancedCode[0] == 5
-}
-func (r sendResult) shouldTryAltSmtp() bool {
-	// Gmail specific: https://support.google.com/a/answer/3726730?hl=en
-	if strings.Contains(r.msg, "this message has been blocked") {
-		return false
-	}
-	// Mailbox Status
-	if r.enhancedCode[0] == 5 && r.enhancedCode[1] == 2 {
-		return false
-	}
-	return true
-}
-
-func parseSendError(input error) (*sendResult, error) {
-	parts := strings.SplitN(input.Error(), " ", 3)
-
-	code, err := strconv.Atoi(parts[0])
-	if err != nil {
-		return nil, errors.Wrap(err, "could not parse error code")
-	}
-
-	var enhancedCode enhancedCode
-
-	enhancedCodeParts := strings.SplitN(parts[1], ".", 3)
-	for i, str := range enhancedCodeParts {
-		n, err := strconv.Atoi(str)
-		if err != nil {
-			return nil, errors.Wrap(err, "could not parse enhanced error code")
-		}
-		enhancedCode[i] = n
-	}
-	msg := parts[2]
-
-	return &sendResult{code, enhancedCode, msg}, nil
 }
 
 func main() {
