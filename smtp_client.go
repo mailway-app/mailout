@@ -332,7 +332,7 @@ var testHookStartTLS func(*tls.Config) // nil, except for tests
 // functionality. Higher-level packages exist outside of the standard
 // library.
 func SendMail(c *Client, addr string, a smtp.Auth, from string, to []string,
-	msg []byte) error {
+	msg []byte, disallowTLS bool) error {
 	if err := validateLine(from); err != nil {
 		return err
 	}
@@ -347,7 +347,7 @@ func SendMail(c *Client, addr string, a smtp.Auth, from string, to []string,
 	if err = c.hello(); err != nil {
 		return err
 	}
-	if ok, _ := c.Extension("STARTTLS"); ok {
+	if ok, _ := c.Extension("STARTTLS"); ok && !disallowTLS {
 		config := &tls.Config{ServerName: c.serverName}
 		if testHookStartTLS != nil {
 			testHookStartTLS(config)

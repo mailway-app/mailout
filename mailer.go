@@ -78,6 +78,17 @@ func findMX(domain string, pref int) (EmailServer, error) {
 	return EmailServer{}, errors.New("No suitable MX found")
 }
 
+func isInsecureMX(host string) bool {
+	list := config.CurrConfig.MailoutInsecureMX
+	for _, b := range list {
+		if b+"." == host {
+			return true
+		}
+	}
+	return false
+
+}
+
 func sendAltSmtp(from string, to string, data []byte) error {
 	auth := netsmtp.PlainAuth("", config.CurrConfig.OutSMTPUsername, config.CurrConfig.OutSMTPPassword, config.CurrConfig.OutSMTPHost)
 	port := config.CurrConfig.OutSMTPPort
@@ -89,7 +100,7 @@ func sendAltSmtp(from string, to string, data []byte) error {
 	if err != nil {
 		return errors.Wrap(err, "could not connect to SMTP")
 	}
-	return SendMail(client, addr, auth, from, []string{to}, data)
+	return SendMail(client, addr, auth, from, []string{to}, data, false)
 }
 
 func testPort(host string, port int) bool {
@@ -137,9 +148,13 @@ func sendMailToServer(
 	}
 	defer client.Close()
 
+	disallowTLS := isInsecureMX(server.host)
+	if disallowTLS {
+		log.Debugf("disallow TLS for %s", server.host)
+	}
 	err = SendMail(
 		client, server.String(), nil,
-		returnPath, []string{to}, signedData)
+		returnPath, []string{to}, signedData, disallowTLS)
 
 	// if we managed to send from the current machine, stop here. Otherwise
 	// try other alternatives.
