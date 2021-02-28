@@ -11,6 +11,7 @@ import (
 	"time"
 
 	config "github.com/mailway-app/config"
+	"github.com/mailway-app/golib/rate"
 
 	"github.com/mhale/smtpd"
 	"github.com/pkg/errors"
@@ -20,6 +21,11 @@ import (
 
 var (
 	unknownError = errors.New("unknown error")
+	rateError    = errors.New("450 4.4.2 Temporarily rate limited; suspicious behavior")
+
+	rateAltSMTPLimiter = rate.NewRaterLimiter()
+
+	RATE_ALT_SMTP_LIMIT = 100
 )
 
 const (
@@ -80,6 +86,7 @@ func Run(addr string, handler smtpd.Handler, rcpt smtpd.HandlerRcpt) error {
 		LogRead:     logger,
 		LogWrite:    logger,
 	}
+	log.Infof("Forwarding listening on %s", addr)
 	return srv.ListenAndServe()
 }
 
@@ -115,7 +122,8 @@ func mailHandler(origin net.Addr, from string, to []string, in []byte) error {
 		}
 		signedData := outMail
 
-		if _, err := os.Stat(config.CurrConfig.OutDKIMPath); !os.IsNotExist(err) {
+		_, err = os.Stat(config.CurrConfig.OutDKIMPath)
+		if err == nil {
 			options := dkim.NewSigOptions()
 			privateKey, err := ioutil.ReadFile(config.CurrConfig.OutDKIMPath)
 			check(err)
@@ -133,7 +141,7 @@ func mailHandler(origin net.Addr, from string, to []string, in []byte) error {
 				return unknownError
 			}
 		} else {
-			log.Warnf("couldn't sign email because key was not found at: %s", config.CurrConfig.OutDKIMPath)
+			log.Warnf("couldn't sign email because key was not found at %s: %s", config.CurrConfig.OutDKIMPath, err)
 		}
 
 		err = sendMailToServer(
@@ -156,6 +164,9 @@ func main() {
 	}
 	if config.CurrConfig.InstanceHostname == "" {
 		log.Fatal("instance hostname is needed")
+	}
+	if v := config.CurrConfig.MailoutRateAltSMTPCount; v > 0 {
+		RATE_ALT_SMTP_LIMIT = v
 	}
 
 	addr := fmt.Sprintf("127.0.0.1:%d", config.CurrConfig.PortMailout)

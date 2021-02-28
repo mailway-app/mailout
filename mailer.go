@@ -86,10 +86,15 @@ func isInsecureMX(host string) bool {
 		}
 	}
 	return false
-
 }
 
-func sendAltSmtp(from string, to string, data []byte) error {
+func sendAltSmtp(domain string, from string, to string, data []byte) error {
+	if rateAltSMTPLimiter.GetCount(domain) > uint(RATE_ALT_SMTP_LIMIT) {
+		log.Errorf("domain %s rate limited for alt smtp", domain)
+		return rateError
+	}
+	rateAltSMTPLimiter.Inc(domain)
+
 	auth := netsmtp.PlainAuth("", config.CurrConfig.OutSMTPUsername, config.CurrConfig.OutSMTPPassword, config.CurrConfig.OutSMTPHost)
 	port := config.CurrConfig.OutSMTPPort
 	if port == 0 {
@@ -172,15 +177,16 @@ func sendMailToServer(
 
 	if errDetails == nil || errDetails.shouldTryAltSmtp() {
 		log.Infof("trying with alternative smtp")
-		err := sendAltSmtp(from, to, data)
+		err := sendAltSmtp(domain, from, to, data)
 		if err == nil {
 			log.Debugf("mail sent with alternative smtp")
 			return nil
 		}
 		log.Errorf("sendAltSmtp: %s\n", err)
+		return err
 	}
 
-	return err
+	return nil
 }
 
 // Prepare email to be sent outside
