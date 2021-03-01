@@ -137,8 +137,8 @@ func sendMailToServer(
 	var client *Client
 	var err error
 
-	// On port 465 try to connect via TLS first
-	if server.port == 465 {
+	// On ports 465 and 587 try to connect via TLS first
+	if server.port == 465 || server.port == 587 {
 		client, err = DialTLS(config.CurrConfig.InstanceHostname, server.String())
 		if err != nil {
 			log.Debugf("failed to connect over TLS: %s", err)
