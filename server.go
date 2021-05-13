@@ -100,7 +100,7 @@ func mailHandler(origin net.Addr, from string, to []string, in []byte) error {
 		}
 		uuid := msg.Header.Get("Mw-Int-Id")
 		domain := msg.Header.Get("Mw-Int-Domain")
-		file := fmt.Sprintf("/tmp/%s.eml", uuid)
+		file := fmt.Sprintf("%s/%s.eml", config.RUNTIME_LOCATION, uuid)
 
 		toAddress, err := parseAddress(to)
 		if err != nil {
